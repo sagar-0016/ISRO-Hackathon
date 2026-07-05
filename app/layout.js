@@ -8,6 +8,15 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
+      <head>
+        <link
+          rel="preload"
+          href="/moon.glb"
+          as="fetch"
+          crossOrigin="anonymous"
+          type="model/gltf-binary"
+        />
+      </head>
       <body>{children}</body>
     </html>
   );

@@ -1,8 +1,9 @@
 "use client";
 
-import { ArcballControls, Html, Text, useGLTF, useProgress } from "@react-three/drei";
+import { ArcballControls, Html, Text } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Component, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Component, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { Line2 } from "three/addons/lines/Line2.js";
 import { LineGeometry } from "three/addons/lines/LineGeometry.js";
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
@@ -27,6 +28,8 @@ const ICE_VISIBLE_STAGES = new Set([
 const LANDING_VISIBLE_STAGES = new Set([
   "landingResults"
 ]);
+const MOON_MODEL_URL = "/moon.glb";
+const MOON_MODEL_SIZE_BYTES = 53851232;
 
 class SceneErrorBoundary extends Component {
   constructor(props) {
@@ -47,13 +50,24 @@ class SceneErrorBoundary extends Component {
   }
 }
 
-function SceneFallback() {
-  const { progress, active } = useProgress();
-  const label = active ? `loading moon model ${Math.round(progress)}%` : "initializing scene";
+function SceneFallback({ progress = 0, active = true }) {
+  const percent = Math.min(100, Math.max(0, Number(progress.toFixed(1))));
+  const statusLabel = active ? "Loading" : "Preparing";
 
   return (
     <Html center>
-      <div className="scene-status scene-status-loading">{label}</div>
+      <div className="scene-status scene-status-loading">
+        <div className="scene-status-copy">
+          <span className="scene-status-title">{statusLabel}</span>
+          <span className="scene-status-percent">{percent.toFixed(1)}%</span>
+        </div>
+        <div className="scene-status-meter" aria-hidden="true">
+          <span
+            className="scene-status-meter-fill"
+            style={{ transform: `scaleX(${percent / 100})` }}
+          />
+        </div>
+      </div>
     </Html>
   );
 }
@@ -347,9 +361,11 @@ function ScanOverlay({ radius, mode }) {
   );
 }
 
-function PathOverlay({ points }) {
+function PathOverlay({ points, dimmed = false }) {
   const { size } = useThree();
   const lineRef = useRef(null);
+  const lineOpacity = dimmed ? 0.2 : 1;
+  const segmentOpacity = dimmed ? 0.2 : 0.98;
   const segmentData = useMemo(() => {
     const up = new THREE.Vector3(0, 1, 0);
 
@@ -390,14 +406,14 @@ function PathOverlay({ points }) {
       color: "#ff7d7d",
       linewidth: 9,
       transparent: true,
-      opacity: 1,
+      opacity: lineOpacity,
       depthTest: false,
       depthWrite: false,
       dashed: false
     });
     lineMaterial.resolution.set(size.width, size.height);
     return lineMaterial;
-  }, [size.height, size.width]);
+  }, [lineOpacity, size.height, size.width]);
 
   const line = useMemo(() => {
     const nextLine = new Line2(geometry, material);
@@ -433,7 +449,7 @@ function PathOverlay({ points }) {
           <meshBasicMaterial
             color="#ff8e8e"
             transparent
-            opacity={0.98}
+            opacity={segmentOpacity}
             depthTest={false}
             depthWrite={false}
           />
@@ -1271,9 +1287,15 @@ function MissionActors({
   return (
     <group>
       {stage === "landingDescent" && (
-        <mesh ref={landerRef}>
+        <mesh ref={landerRef} renderOrder={20}>
           <sphereGeometry args={[0.018, 14, 14]} />
-          <meshStandardMaterial color="#f6eee3" emissive="#d2b37b" emissiveIntensity={0.3} />
+          <meshStandardMaterial
+            color="#f6eee3"
+            emissive="#d2b37b"
+            emissiveIntensity={0.3}
+            depthTest={false}
+            depthWrite={false}
+          />
         </mesh>
       )}
 
@@ -1283,9 +1305,15 @@ function MissionActors({
         stage === "hopper" ||
         stage === "complete") &&
         landingPoint && (
-          <mesh position={landingPoint}>
+          <mesh position={landingPoint} renderOrder={18}>
             <sphereGeometry args={[0.015, 14, 14]} />
-            <meshStandardMaterial color="#f6eee3" emissive="#d2b37b" emissiveIntensity={0.24} />
+            <meshStandardMaterial
+              color="#f6eee3"
+              emissive="#d2b37b"
+              emissiveIntensity={0.24}
+              depthTest={false}
+              depthWrite={false}
+            />
           </mesh>
         )}
 
@@ -1295,14 +1323,19 @@ function MissionActors({
         stage === "complete") &&
         routePoints?.length > 1 && (
         <>
-          <PathOverlay points={routePoints} />
+          <PathOverlay
+            points={routePoints}
+            dimmed={stage === "traverse" || stage === "hopper" || stage === "complete"}
+          />
           {(stage === "traverse" || stage === "hopper" || stage === "complete") && (
-            <mesh ref={roverRef}>
+            <mesh ref={roverRef} renderOrder={24}>
               <boxGeometry args={[0.036, 0.012, 0.018]} />
               <meshStandardMaterial
                 color="#ff7c7c"
                 emissive="#e45151"
                 emissiveIntensity={0.34}
+                depthTest={false}
+                depthWrite={false}
               />
             </mesh>
           )}
@@ -1310,9 +1343,15 @@ function MissionActors({
       )}
 
       {stage === "traverse" && (
-        <mesh ref={hopperRef}>
+        <mesh ref={hopperRef} renderOrder={25}>
           <sphereGeometry args={[0.011, 12, 12]} />
-          <meshStandardMaterial color="#86f2a6" emissive="#5edd82" emissiveIntensity={0.34} />
+          <meshStandardMaterial
+            color="#86f2a6"
+            emissive="#5edd82"
+            emissiveIntensity={0.34}
+            depthTest={false}
+            depthWrite={false}
+          />
         </mesh>
       )}
 
@@ -1328,17 +1367,116 @@ function MoonModel({
   traverseHazards,
   onTraverseComplete
 }) {
-  const { scene } = useGLTF("/moon.glb");
-  const modelScene = useMemo(() => scene.clone(), [scene]);
+  const [gltfScene, setGltfScene] = useState(null);
+  const [loadProgress, setLoadProgress] = useState(0);
+  const [loadActive, setLoadActive] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const modelScene = useMemo(() => (gltfScene ? gltfScene.clone() : null), [gltfScene]);
   const rootRef = useRef(null);
   const [bounds, setBounds] = useState({ radius: 1 });
   const [polePoints, setPolePoints] = useState(null);
   const [surfaceReady, setSurfaceReady] = useState(false);
 
+  useEffect(() => {
+    let cancelled = false;
+    const loader = new GLTFLoader();
+    const abortController = new AbortController();
+
+    setLoadActive(true);
+    setLoadError(null);
+    setLoadProgress(0);
+
+    const loadModel = async () => {
+      try {
+        const response = await fetch(MOON_MODEL_URL, {
+          signal: abortController.signal,
+          cache: "force-cache"
+        });
+
+        if (!response.ok || !response.body) {
+          throw new Error(`failed to fetch glb: ${response.status}`);
+        }
+
+        const contentLength =
+          Number(response.headers.get("content-length")) || MOON_MODEL_SIZE_BYTES;
+        const reader = response.body.getReader();
+        const chunks = [];
+        let receivedLength = 0;
+
+        while (!cancelled) {
+          const { done, value } = await reader.read();
+
+          if (done) {
+            break;
+          }
+
+          if (!value) {
+            continue;
+          }
+
+          chunks.push(value);
+          receivedLength += value.length;
+
+          setLoadProgress(
+            Math.min(100, (receivedLength / Math.max(contentLength, 1)) * 100)
+          );
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        const glbBytes = new Uint8Array(receivedLength);
+        let offset = 0;
+
+        chunks.forEach((chunk) => {
+          glbBytes.set(chunk, offset);
+          offset += chunk.length;
+        });
+
+        setLoadActive(false);
+
+        loader.parse(
+          glbBytes.buffer,
+          "",
+          (gltf) => {
+            if (cancelled) {
+              return;
+            }
+
+            setGltfScene(gltf.scene);
+            setLoadProgress(100);
+          },
+          () => {
+            if (cancelled) {
+              return;
+            }
+
+            setLoadError(true);
+          }
+        );
+      } catch (error) {
+        if (cancelled || error?.name === "AbortError") {
+          return;
+        }
+
+        setLoadError(true);
+        setLoadActive(false);
+      }
+    };
+
+    loadModel();
+
+    return () => {
+      cancelled = true;
+      abortController.abort();
+    };
+  }, []);
+
   useLayoutEffect(() => {
     setSurfaceReady(false);
 
-    if (!rootRef.current) {
+    if (!rootRef.current || !modelScene) {
       return;
     }
 
@@ -1370,6 +1508,14 @@ function MoonModel({
     setBounds({ radius: sphere.radius });
     setSurfaceReady(true);
   }, [modelScene]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.localStorage.setItem("moon-glb-cached", "1");
+  }, []);
   const campaignTargets = useMemo(() => {
     if (!selectedLandingSite || !iceCandidates?.length) {
       return [];
@@ -1467,6 +1613,14 @@ function MoonModel({
     projectedLandingSites.find((site) => site.id === selectedLandingSite.id) ??
     selectedLandingSite;
 
+  if (loadError) {
+    return <SceneError />;
+  }
+
+  if (!modelScene) {
+    return <SceneFallback progress={loadProgress} active={loadActive} />;
+  }
+
   return (
     <group>
       <primitive ref={rootRef} object={modelScene} />
@@ -1509,8 +1663,6 @@ function MoonModel({
   );
 }
 
-useGLTF.preload("/moon.glb");
-
 export default function MoonScene({
   stage,
   selectedLandingSite,
@@ -1531,16 +1683,14 @@ export default function MoonScene({
         <directionalLight position={[5, 0.9, 0]} intensity={1.15} color="#efe2b8" />
         <directionalLight position={[-4, -2, -3]} intensity={0.08} color="#5f7fb0" />
         <SceneErrorBoundary fallback={<SceneError />}>
-          <Suspense fallback={<SceneFallback />}>
-            <MoonModel
-              stage={stage}
-              selectedLandingSite={selectedLandingSite}
-              landingSites={landingSites}
-              iceCandidates={iceCandidates}
-              traverseHazards={traverseHazards}
-              onTraverseComplete={onTraverseComplete}
-            />
-          </Suspense>
+          <MoonModel
+            stage={stage}
+            selectedLandingSite={selectedLandingSite}
+            landingSites={landingSites}
+            iceCandidates={iceCandidates}
+            traverseHazards={traverseHazards}
+            onTraverseComplete={onTraverseComplete}
+          />
         </SceneErrorBoundary>
         <ArcballControls
           enablePan={false}
