@@ -8,7 +8,8 @@ import {
   iceCandidates,
   landingSites,
   missionMessages,
-  telemetryByStage
+  telemetryByStage,
+  traverseHazards
 } from "../data/missionDemo";
 
 const STAGES = {
@@ -19,6 +20,7 @@ const STAGES = {
   LANDING_RESULTS: "landingResults",
   LANDING_DESCENT: "landingDescent",
   LANDED: "landed",
+  PATH_READY: "pathReady",
   TRAVERSE: "traverse",
   HOPPER: "hopper",
   COMPLETE: "complete"
@@ -32,7 +34,8 @@ const STAGE_DURATIONS_MS = {
   landingResults: 1200,
   landingDescent: 3400,
   landed: 1200,
-  traverse: 1800,
+  pathReady: 1200,
+  traverse: 16000,
   hopper: 1800,
   complete: 1200
 };
@@ -93,9 +96,9 @@ export default function Home() {
         id: "finding-landing-rank",
         label: "Landing",
         marker: "landing",
-        title: "Safe-access landing zones ranked",
+        title: "5 primary and 2 reserve landing zones retained",
         detail:
-          "Illumination stability, traverse risk, and reachable ice opportunity were combined into the final landing score."
+          "Mission scoring fused GLB-derived terrain safety, landing-patch continuity, route feasibility, and conservative illumination and thermal proxies."
       });
     }
 
@@ -103,19 +106,20 @@ export default function Home() {
       entries.push({
         id: "finding-landing-site",
         label: "Selected",
-        marker: "landing",
+        marker: "selected",
         title: `${selectedLandingSite.name} committed for descent`,
-        detail: `Score ${selectedLandingSite.score} with ${selectedLandingSite.illumination.toLowerCase()} illumination and ${selectedLandingSite.traverseRisk.toLowerCase()} traverse risk.`
+        detail: `Score ${selectedLandingSite.score}. ${selectedLandingSite.classification} zone anchored to ${selectedLandingSite.anchorTarget}, with ${selectedLandingSite.traverseRisk.toLowerCase()} traverse risk and ${selectedLandingSite.reachableIce.toLowerCase()} reachable ice.`
       });
     }
 
-    if (hasReached(STAGES.TRAVERSE)) {
+    if (hasReached(STAGES.PATH_READY)) {
       entries.push({
         id: "finding-traverse",
         label: "Traverse",
-        title: "Rover route locked to ice-supporting zone",
+        marker: "traverse",
+        title: "Rover campaign route locked across 5 ice targets",
         detail:
-          "The surface path is constrained to the selected landing site and the nearest curated south-polar science target from the retained review set."
+          "The surface path now chains five retained south-polar science targets and uses Theta*-style pruning through the polar hazard cost field."
       });
     }
 
@@ -123,6 +127,7 @@ export default function Home() {
       entries.push({
         id: "finding-hopper",
         label: "Hopper",
+        marker: "hopper",
         title: "Micro-rover deployed for local inspection",
         detail:
           "Close-range terrain inspection and local subsurface-accessibility checks are now active near the target perimeter."
@@ -133,6 +138,7 @@ export default function Home() {
       entries.push({
         id: "finding-final",
         label: "Estimate",
+        marker: "estimate",
         title: finalEstimate.detected,
         detail: `${finalEstimate.volume}. ${finalEstimate.confidence}.`
       });
@@ -266,18 +272,18 @@ export default function Home() {
             {stage === STAGES.LANDED && (
               <button
                 className="action-button primary"
-                onClick={() => setStage(STAGES.TRAVERSE)}
+                onClick={() => setStage(STAGES.PATH_READY)}
               >
-                Proceed Mission
+                Create Rover Path
               </button>
             )}
 
-            {stage === STAGES.HOPPER && (
+            {stage === STAGES.PATH_READY && (
               <button
                 className="action-button primary"
-                onClick={() => setStage(STAGES.COMPLETE)}
+                onClick={() => setStage(STAGES.TRAVERSE)}
               >
-                Estimate Ice Volume
+                Start Autonomous Traverse
               </button>
             )}
           </div>
@@ -286,6 +292,7 @@ export default function Home() {
         {(stage === STAGES.LANDING_RESULTS ||
           stage === STAGES.LANDING_DESCENT ||
           stage === STAGES.LANDED ||
+          stage === STAGES.PATH_READY ||
           stage === STAGES.TRAVERSE ||
           stage === STAGES.HOPPER ||
           stage === STAGES.COMPLETE) && (
@@ -305,8 +312,17 @@ export default function Home() {
                     <strong>{site.name}</strong>
                     <span>{site.score}</span>
                   </div>
-                  <p>Illumination: {site.illumination}</p>
-                  <p>Traverse risk: {site.traverseRisk}</p>
+                  <p>{site.classification} zone · anchor {site.anchorTarget}</p>
+                  <p>
+                    Safety {site.factorPercents.safety}% · Ellipse {site.factorPercents.ellipse}%
+                  </p>
+                  <p>
+                    Illumination {site.factorPercents.illumination}% · Traverse {site.factorPercents.traverse}%
+                  </p>
+                  <p>
+                    Reachable ice {site.factorPercents.reachable}% · Risk penalty {site.factorPercents.riskPenalty}%
+                  </p>
+                  <p className="site-note">{site.geomorphology}</p>
                 </button>
               ))}
             </div>
@@ -337,18 +353,11 @@ export default function Home() {
           {findings.map((finding) => (
             <div key={finding.id} className="panel-block finding-card">
               <div className="finding-head">
-                {finding.marker === "ice" && (
+                {finding.marker && (
                   <span
-                    className="finding-legend finding-legend-ice"
-                    aria-label="ice target marker"
-                    title="ice target marker"
-                  />
-                )}
-                {finding.marker === "landing" && (
-                  <span
-                    className="finding-legend finding-legend-landing"
-                    aria-label="landing target marker"
-                    title="landing target marker"
+                    className={`finding-legend finding-legend-${finding.marker}`}
+                    aria-label={`${finding.marker} marker`}
+                    title={`${finding.marker} marker`}
                   />
                 )}
                 <p className="panel-kicker">{finding.label}</p>
@@ -366,7 +375,8 @@ export default function Home() {
           selectedLandingSite={selectedLandingSite}
           landingSites={landingSites}
           iceCandidates={iceCandidates}
-          onTraverseComplete={() => setStage(STAGES.HOPPER)}
+          traverseHazards={traverseHazards}
+          onTraverseComplete={() => setStage(STAGES.COMPLETE)}
         />
       </section>
     </main>

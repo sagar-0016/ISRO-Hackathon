@@ -301,6 +301,12 @@ body {
   font-size: 0.78rem;
 }
 
+.site-card .site-note {
+  margin-bottom: 0;
+  color: #c4dbca;
+  line-height: 1.45;
+}
+
 .mini-row {
   display: flex;
   justify-content: space-between;
@@ -511,6 +517,49 @@ body {
   animation: finding-legend-pulse-landing 1.8s ease-in-out infinite;
 }
 
+.finding-legend-selected {
+  border-radius: 999px;
+  background: #f6eee3;
+  box-shadow:
+    0 0 0 1px rgba(246, 238, 227, 0.22),
+    0 0 10px rgba(210, 179, 123, 0.72),
+    0 0 22px rgba(210, 179, 123, 0.46);
+  animation: finding-legend-pulse-selected 1.8s ease-in-out infinite;
+}
+
+.finding-legend-traverse {
+  width: 10px;
+  height: 5px;
+  border-radius: 999px;
+  background: #ff6565;
+  box-shadow:
+    0 0 0 1px rgba(255, 101, 101, 0.22),
+    0 0 10px rgba(255, 101, 101, 0.72),
+    0 0 20px rgba(255, 101, 101, 0.34);
+  animation: finding-legend-pulse-traverse 1.8s ease-in-out infinite;
+}
+
+.finding-legend-hopper {
+  border-radius: 999px;
+  background: #7df2a0;
+  box-shadow:
+    0 0 0 1px rgba(125, 242, 160, 0.22),
+    0 0 10px rgba(125, 242, 160, 0.72),
+    0 0 22px rgba(125, 242, 160, 0.42);
+  animation: finding-legend-pulse-hopper 1.8s ease-in-out infinite;
+}
+
+.finding-legend-estimate {
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-bottom: 10px solid #75e8ff;
+  filter: drop-shadow(0 0 8px rgba(117, 232, 255, 0.76))
+    drop-shadow(0 0 18px rgba(117, 232, 255, 0.38));
+  animation: finding-legend-pulse-estimate 1.8s ease-in-out infinite;
+}
+
 .finding-title {
   display: block;
   margin: 0 0 8px;
@@ -579,6 +628,86 @@ body {
       0 0 0 1px rgba(120, 243, 156, 0.28),
       0 0 14px rgba(120, 243, 156, 0.82),
       0 0 28px rgba(120, 243, 156, 0.44);
+  }
+}
+
+@keyframes finding-legend-pulse-selected {
+  0%,
+  100% {
+    transform: scale(0.92);
+    opacity: 0.84;
+    box-shadow:
+      0 0 0 1px rgba(246, 238, 227, 0.18),
+      0 0 8px rgba(210, 179, 123, 0.52),
+      0 0 16px rgba(210, 179, 123, 0.26);
+  }
+
+  50% {
+    transform: scale(1.14);
+    opacity: 1;
+    box-shadow:
+      0 0 0 1px rgba(246, 238, 227, 0.3),
+      0 0 14px rgba(210, 179, 123, 0.86),
+      0 0 28px rgba(210, 179, 123, 0.52);
+  }
+}
+
+@keyframes finding-legend-pulse-traverse {
+  0%,
+  100% {
+    transform: scaleX(0.92) scaleY(0.9);
+    opacity: 0.8;
+    box-shadow:
+      0 0 0 1px rgba(255, 101, 101, 0.18),
+      0 0 8px rgba(255, 101, 101, 0.48),
+      0 0 16px rgba(255, 101, 101, 0.2);
+  }
+
+  50% {
+    transform: scaleX(1.08) scaleY(1);
+    opacity: 1;
+    box-shadow:
+      0 0 0 1px rgba(255, 101, 101, 0.28),
+      0 0 12px rgba(255, 101, 101, 0.8),
+      0 0 24px rgba(255, 101, 101, 0.38);
+  }
+}
+
+@keyframes finding-legend-pulse-hopper {
+  0%,
+  100% {
+    transform: scale(0.92);
+    opacity: 0.82;
+    box-shadow:
+      0 0 0 1px rgba(125, 242, 160, 0.18),
+      0 0 8px rgba(125, 242, 160, 0.5),
+      0 0 16px rgba(125, 242, 160, 0.22);
+  }
+
+  50% {
+    transform: scale(1.14);
+    opacity: 1;
+    box-shadow:
+      0 0 0 1px rgba(125, 242, 160, 0.28),
+      0 0 14px rgba(125, 242, 160, 0.82),
+      0 0 28px rgba(125, 242, 160, 0.44);
+  }
+}
+
+@keyframes finding-legend-pulse-estimate {
+  0%,
+  100% {
+    transform: scale(0.92);
+    opacity: 0.82;
+    filter: drop-shadow(0 0 6px rgba(117, 232, 255, 0.5))
+      drop-shadow(0 0 12px rgba(117, 232, 255, 0.22));
+  }
+
+  50% {
+    transform: scale(1.12);
+    opacity: 1;
+    filter: drop-shadow(0 0 10px rgba(117, 232, 255, 0.82))
+      drop-shadow(0 0 22px rgba(117, 232, 255, 0.42));
   }
 }
 
