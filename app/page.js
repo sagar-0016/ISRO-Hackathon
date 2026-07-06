@@ -40,6 +40,8 @@ const STAGE_DURATIONS_MS = {
   complete: 1200
 };
 const TELEMETRY_LINE_GAP_CHARS = 4;
+const DESKTOP_FINDING_LIFETIME_MS = 6000;
+const MOBILE_FINDING_LIFETIME_MS = 2000;
 
 export default function Home() {
   const defaultLanding = useMemo(
@@ -47,9 +49,24 @@ export default function Home() {
     []
   );
   const [stage, setStage] = useState(STAGES.IDLE);
+  const [sceneReady, setSceneReady] = useState(false);
+  const [routeBuildState, setRouteBuildState] = useState("idle");
+  const [routeBuildProgress, setRouteBuildProgress] = useState(0);
   const [selectedLandingSiteId, setSelectedLandingSiteId] = useState(defaultLanding.id);
   const [visibleTelemetryCount, setVisibleTelemetryCount] = useState(1);
   const [typedCharCount, setTypedCharCount] = useState(0);
+  const [findingBirths, setFindingBirths] = useState({});
+  const [findingClock, setFindingClock] = useState(Date.now());
+  const showLandingSelectionWindow = stage === STAGES.LANDING_RESULTS;
+  const showSelectedSitePanel =
+    stage === STAGES.LANDING_DESCENT ||
+    stage === STAGES.LANDED ||
+    stage === STAGES.PATH_READY ||
+    stage === STAGES.TRAVERSE ||
+    stage === STAGES.HOPPER ||
+    stage === STAGES.COMPLETE;
+  const showLandingOptionsPanel = false;
+  const hasUpperPanels = showSelectedSitePanel || showLandingOptionsPanel;
   const selectedLandingSite =
     landingSites.find((site) => site.id === selectedLandingSiteId) ?? defaultLanding;
 
@@ -226,6 +243,55 @@ export default function Home() {
     });
   }, [currentStageTelemetry, stage, typedCharCount, visibleTelemetryCount]);
 
+  useEffect(() => {
+    if (!findings.length) {
+      return undefined;
+    }
+
+    const now = Date.now();
+    setFindingBirths((current) => {
+      let changed = false;
+      const next = { ...current };
+
+      findings.forEach((finding) => {
+        if (!next[finding.id]) {
+          next[finding.id] = now;
+          changed = true;
+        }
+      });
+
+      return changed ? next : current;
+    });
+  }, [findings]);
+
+  useEffect(() => {
+    if (!Object.keys(findingBirths).length) {
+      return undefined;
+    }
+
+    const timer = window.setInterval(() => {
+      setFindingClock(Date.now());
+    }, 250);
+
+    return () => window.clearInterval(timer);
+  }, [findingBirths]);
+
+  const visibleFindings = useMemo(() => {
+    const lifetimeMs =
+      typeof window !== "undefined" && window.innerWidth <= 720
+        ? MOBILE_FINDING_LIFETIME_MS
+        : DESKTOP_FINDING_LIFETIME_MS;
+
+    return findings.filter((finding) => {
+      const birth = findingBirths[finding.id];
+      if (!birth) {
+        return false;
+      }
+
+      return findingClock - birth < lifetimeMs;
+    });
+  }, [findingBirths, findingClock, findings]);
+
   return (
     <main className="mission-shell">
       <section className="mission-panel mission-panel-top-left">
@@ -237,97 +303,178 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="mission-panel mission-panel-bottom-left">
-        <div className="panel-block">
+      {showLandingSelectionWindow && (
+        <section className="selection-stage-overlay">
+          <div className="selection-stage-dimmer selection-stage-dimmer-left" />
+
+          <div className="selection-window-grid">
+            <div className="selection-window-column selection-window-column-left">
+              <div className="panel-block panel-block-scroll selection-window-sites">
+                <p className="panel-kicker">Landing Site Options</p>
+                <div className="panel-block-scroll-body">
+                  <div className="site-list selection-site-list">
+                    {landingSites.map((site, index) => (
+                      <button
+                        key={site.id}
+                        className={`site-card ${
+                          selectedLandingSiteId === site.id ? "selected" : ""
+                        }`}
+                        onClick={() => setSelectedLandingSiteId(site.id)}
+                      >
+                        <div className="site-card-head">
+                          <strong>{`Site ${String.fromCharCode(65 + index)}`}</strong>
+                          <span>{site.score}</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="selection-window-preview" aria-hidden="true" />
+
+            <div className="selection-window-column selection-window-column-right">
+              <div className="selection-window-side">
+                <div className="panel-block panel-block-scroll selection-window-details">
+                  <p className="panel-kicker">Selected Landing Site</p>
+                  <div className="panel-block-scroll-body">
+                    <div className="site-card-head site-card-head-static">
+                      <strong>{selectedLandingSite.name}</strong>
+                      <span>{selectedLandingSite.score}</span>
+                    </div>
+                    <p className="site-summary-line">
+                      {selectedLandingSite.classification} zone · anchor {selectedLandingSite.anchorTarget}
+                    </p>
+                    <p className="site-summary-line">
+                      Safety {selectedLandingSite.factorPercents.safety}% · Ellipse {selectedLandingSite.factorPercents.ellipse}%
+                    </p>
+                    <p className="site-summary-line">
+                      Illumination {selectedLandingSite.factorPercents.illumination}% · Traverse {selectedLandingSite.factorPercents.traverse}%
+                    </p>
+                    <p className="site-summary-line">
+                      Reachable ice {selectedLandingSite.factorPercents.reachable}% · Risk penalty {selectedLandingSite.factorPercents.riskPenalty}%
+                    </p>
+                    <p className="site-note">{selectedLandingSite.geomorphology}</p>
+                  </div>
+                </div>
+
+                <div className="panel-block selection-window-action">
+                  <div className="action-stack">
+                    <button
+                      className="action-button primary"
+                      onClick={() => setStage(STAGES.LANDING_DESCENT)}
+                    >
+                      Land Here
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="selection-stage-dimmer selection-stage-dimmer-right" />
+        </section>
+      )}
+
+      <section
+        className={`mission-panel mission-panel-bottom-left ${
+          showSelectedSitePanel
+              ? "mission-panel-bottom-left-details-only"
+              : "mission-panel-bottom-left-compact"
+        }`}
+      >
+        <div className="left-panel-upper">
+          {showSelectedSitePanel && (
+            <div className="panel-block panel-block-scroll panel-block-details">
+              <p className="panel-kicker">Selected Landing Site</p>
+              <div className="panel-block-scroll-body">
+                <div className="site-card-head site-card-head-static">
+                  <strong>{selectedLandingSite.name}</strong>
+                  <span>{selectedLandingSite.score}</span>
+                </div>
+                {stage === STAGES.LANDING_RESULTS ? (
+                  <>
+                    <p className="site-summary-line">
+                      {selectedLandingSite.classification} zone · anchor {selectedLandingSite.anchorTarget}
+                    </p>
+                    <p className="site-summary-line">
+                      Safety {selectedLandingSite.factorPercents.safety}% · Ellipse {selectedLandingSite.factorPercents.ellipse}%
+                    </p>
+                    <p className="site-summary-line">
+                      Illumination {selectedLandingSite.factorPercents.illumination}% · Traverse {selectedLandingSite.factorPercents.traverse}%
+                    </p>
+                    <p className="site-summary-line">
+                      Reachable ice {selectedLandingSite.factorPercents.reachable}% · Risk penalty {selectedLandingSite.factorPercents.riskPenalty}%
+                    </p>
+                    <p className="site-note">{selectedLandingSite.geomorphology}</p>
+                  </>
+                ) : null}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="panel-block panel-block-mission">
           <p className="panel-kicker">Mission Control</p>
           <div className="action-stack">
-            {(stage === STAGES.IDLE || stage === STAGES.ICE_RESULTS) && (
+            {(stage === STAGES.IDLE || stage === STAGES.ICE_SCAN) && (
               <button
                 className="action-button primary"
                 onClick={() => setStage(STAGES.ICE_SCAN)}
-                disabled={stage === STAGES.ICE_SCAN}
+                disabled={stage === STAGES.ICE_SCAN || !sceneReady}
               >
-                Detect Ice
+                {stage === STAGES.ICE_SCAN ? "Detecting" : "Detect Ice"}
               </button>
             )}
 
-            {stage === STAGES.ICE_RESULTS && (
+            {(stage === STAGES.ICE_RESULTS || stage === STAGES.LANDING_SCAN) && (
               <button
                 className="action-button primary"
                 onClick={() => setStage(STAGES.LANDING_SCAN)}
+                disabled={stage === STAGES.LANDING_SCAN}
               >
-                Find Landing Sites
+                {stage === STAGES.LANDING_SCAN ? "Finding" : "Find Landing Sites"}
               </button>
             )}
 
             {stage === STAGES.LANDING_RESULTS && (
-              <button
-                className="action-button primary"
-                onClick={() => setStage(STAGES.LANDING_DESCENT)}
-              >
-                Land At Selected Site
+              <button className="action-button primary" disabled>
+                Selecting
               </button>
             )}
 
-            {stage === STAGES.LANDED && (
+            {stage === STAGES.LANDING_DESCENT && (
+              <button className="action-button primary" disabled>
+                Landing
+              </button>
+            )}
+
+            {(stage === STAGES.LANDED || stage === STAGES.PATH_READY) && (
               <button
                 className="action-button primary"
                 onClick={() => setStage(STAGES.PATH_READY)}
+                disabled={stage === STAGES.PATH_READY || routeBuildState !== "ready"}
               >
-                Create Rover Path
+                {stage === STAGES.PATH_READY || routeBuildState === "building"
+                  ? `Preparing ${Math.round(routeBuildProgress)}%`
+                  : "Create Rover Path"}
               </button>
             )}
 
-            {stage === STAGES.PATH_READY && (
+            {(stage === STAGES.PATH_READY || stage === STAGES.TRAVERSE || stage === STAGES.HOPPER) && (
               <button
                 className="action-button primary"
                 onClick={() => setStage(STAGES.TRAVERSE)}
+                disabled={stage !== STAGES.PATH_READY || routeBuildState !== "ready"}
               >
-                Start Autonomous Traverse
+                {stage === STAGES.TRAVERSE || stage === STAGES.HOPPER
+                  ? "Traversing"
+                  : "Start Autonomous Traverse"}
               </button>
             )}
           </div>
         </div>
-
-        {(stage === STAGES.LANDING_RESULTS ||
-          stage === STAGES.LANDING_DESCENT ||
-          stage === STAGES.LANDED ||
-          stage === STAGES.PATH_READY ||
-          stage === STAGES.TRAVERSE ||
-          stage === STAGES.HOPPER ||
-          stage === STAGES.COMPLETE) && (
-          <div className="panel-block">
-            <p className="panel-kicker">Landing Site Options</p>
-            <div className="site-list">
-              {landingSites.map((site) => (
-                <button
-                  key={site.id}
-                  className={`site-card ${
-                    selectedLandingSiteId === site.id ? "selected" : ""
-                  }`}
-                  onClick={() => setSelectedLandingSiteId(site.id)}
-                  disabled={stage !== STAGES.LANDING_RESULTS}
-                >
-                  <div className="site-card-head">
-                    <strong>{site.name}</strong>
-                    <span>{site.score}</span>
-                  </div>
-                  <p>{site.classification} zone · anchor {site.anchorTarget}</p>
-                  <p>
-                    Safety {site.factorPercents.safety}% · Ellipse {site.factorPercents.ellipse}%
-                  </p>
-                  <p>
-                    Illumination {site.factorPercents.illumination}% · Traverse {site.factorPercents.traverse}%
-                  </p>
-                  <p>
-                    Reachable ice {site.factorPercents.reachable}% · Risk penalty {site.factorPercents.riskPenalty}%
-                  </p>
-                  <p className="site-note">{site.geomorphology}</p>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
       </section>
 
       <section className="mission-panel mission-panel-bottom-center">
@@ -348,26 +495,28 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="mission-panel mission-panel-bottom-right">
-        <div className="findings-stack">
-          {findings.map((finding) => (
-            <div key={finding.id} className="panel-block finding-card">
-              <div className="finding-head">
-                {finding.marker && (
-                  <span
-                    className={`finding-legend finding-legend-${finding.marker}`}
-                    aria-label={`${finding.marker} marker`}
-                    title={`${finding.marker} marker`}
-                  />
-                )}
-                <p className="panel-kicker">{finding.label}</p>
+      {visibleFindings.length > 0 && (
+        <section className="mission-panel mission-panel-bottom-right">
+          <div className="findings-stack">
+            {visibleFindings.map((finding) => (
+              <div key={finding.id} className="panel-block finding-card">
+                <div className="finding-head">
+                  {finding.marker && (
+                    <span
+                      className={`finding-legend finding-legend-${finding.marker}`}
+                      aria-label={`${finding.marker} marker`}
+                      title={`${finding.marker} marker`}
+                    />
+                  )}
+                  <p className="panel-kicker">{finding.label}</p>
+                </div>
+                <strong className="finding-title">{finding.title}</strong>
+                <p className="finding-detail">{finding.detail}</p>
               </div>
-              <strong className="finding-title">{finding.title}</strong>
-              <p className="finding-detail">{finding.detail}</p>
-            </div>
-          ))}
-        </div>
-      </section>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="viewer-stage">
         <MoonScene
@@ -377,6 +526,9 @@ export default function Home() {
           iceCandidates={iceCandidates}
           traverseHazards={traverseHazards}
           onTraverseComplete={() => setStage(STAGES.COMPLETE)}
+          onSceneReady={setSceneReady}
+          onRouteBuildStateChange={setRouteBuildState}
+          onRouteBuildProgressChange={setRouteBuildProgress}
         />
       </section>
     </main>

@@ -53,9 +53,16 @@ class SceneErrorBoundary extends Component {
 function SceneFallback({ progress = 0, active = true }) {
   const percent = Math.min(100, Math.max(0, Number(progress.toFixed(1))));
   const statusLabel = active ? "Loading" : "Preparing";
+  const portalTarget = typeof document !== "undefined" ? document.body : null;
 
   return (
-    <Html center>
+    <Html
+      position={[0, -0.78, 1.02]}
+      center
+      portal={portalTarget ? { current: portalTarget } : undefined}
+      zIndexRange={[10000, 0]}
+      wrapperClass="scene-status-portal"
+    >
       <div className="scene-status scene-status-loading">
         <div className="scene-status-copy">
           <span className="scene-status-title">{statusLabel}</span>
@@ -73,13 +80,218 @@ function SceneFallback({ progress = 0, active = true }) {
 }
 
 function SceneError() {
+  const portalTarget = typeof document !== "undefined" ? document.body : null;
+
   return (
-    <Html center>
+    <Html
+      center
+      portal={portalTarget ? { current: portalTarget } : undefined}
+      zIndexRange={[10000, 0]}
+      wrapperClass="scene-status-portal"
+    >
       <div className="scene-status scene-status-error">
         failed to load moon model
       </div>
     </Html>
   );
+}
+
+function RouteBuildOverlay({ progress = 0 }) {
+  const percent = Math.min(100, Math.max(0, Number(progress.toFixed(1))));
+  const portalTarget = typeof document !== "undefined" ? document.body : null;
+
+  return (
+    <Html
+      position={[0, -0.78, 1.02]}
+      center
+      portal={portalTarget ? { current: portalTarget } : undefined}
+      zIndexRange={[10000, 0]}
+      wrapperClass="scene-status-portal"
+    >
+      <div className="scene-status scene-status-loading">
+        <div className="scene-status-copy">
+          <span className="scene-status-title">Preparing Traverse</span>
+          <span className="scene-status-percent">{percent.toFixed(1)}%</span>
+        </div>
+        <div className="scene-status-meter" aria-hidden="true">
+          <span
+            className="scene-status-meter-fill"
+            style={{ transform: `scaleX(${percent / 100})` }}
+          />
+        </div>
+      </div>
+    </Html>
+  );
+}
+
+function IceScanAutoFramer({ stage, controlsRef }) {
+  const { camera } = useThree();
+  const animationRef = useRef(null);
+  const previousStageRef = useRef(stage);
+
+  useFrame((_, delta) => {
+    if (!animationRef.current) {
+      return;
+    }
+
+    const animation = animationRef.current;
+    const currentPosition = camera.position.clone();
+    const distance = currentPosition.length();
+    const currentLatitude = Math.asin(
+      THREE.MathUtils.clamp(currentPosition.y / Math.max(distance, 1e-6), -1, 1)
+    );
+    const deltaLatitude = animation.targetLatitude - currentLatitude;
+    const maxStep = animation.angularSpeed * delta;
+
+    let nextLatitude = animation.targetLatitude;
+    if (Math.abs(deltaLatitude) > maxStep) {
+      nextLatitude = currentLatitude + Math.sign(deltaLatitude) * maxStep;
+    }
+
+    const horizontalDistance = Math.cos(nextLatitude) * distance;
+    camera.position.set(
+      Math.cos(animation.azimuth) * horizontalDistance,
+      Math.sin(nextLatitude) * distance,
+      Math.sin(animation.azimuth) * horizontalDistance
+    );
+    camera.lookAt(0, 0, 0);
+    if (controlsRef.current) {
+      controlsRef.current.enabled = false;
+    }
+    controlsRef.current?.update();
+
+    if (Math.abs(deltaLatitude) <= THREE.MathUtils.degToRad(0.35)) {
+      if (controlsRef.current) {
+        controlsRef.current.enabled = true;
+      }
+      animationRef.current = null;
+    }
+  });
+
+  useEffect(() => {
+    const enteredIceScan = previousStageRef.current !== "iceScan" && stage === "iceScan";
+    previousStageRef.current = stage;
+
+    if (!enteredIceScan) {
+      return;
+    }
+
+    const currentPosition = camera.position.clone();
+    const distance = currentPosition.length();
+    const currentLatitude = THREE.MathUtils.radToDeg(
+      Math.asin(THREE.MathUtils.clamp(currentPosition.y / Math.max(distance, 1e-6), -1, 1))
+    );
+
+    if (currentLatitude <= -60 && currentLatitude >= -90) {
+      return;
+    }
+
+    const azimuth = Math.atan2(currentPosition.z, currentPosition.x);
+    const targetLatitude = THREE.MathUtils.degToRad(-75);
+
+    animationRef.current = {
+      azimuth,
+      targetLatitude,
+      angularSpeed: THREE.MathUtils.degToRad(39)
+    };
+  }, [camera, controlsRef, stage]);
+
+  return null;
+}
+
+function LandingSelectionAutoFramer({ stage, controlsRef, selectedLandingSite }) {
+  const { camera } = useThree();
+  const animationRef = useRef(null);
+  const previousStageRef = useRef(stage);
+  const previousSiteRef = useRef(selectedLandingSite?.id);
+
+  useFrame((_, delta) => {
+    if (!animationRef.current) {
+      return;
+    }
+
+    const animation = animationRef.current;
+    const currentPosition = camera.position.clone();
+    const distance = currentPosition.length();
+    const currentLatitude = Math.asin(
+      THREE.MathUtils.clamp(currentPosition.y / Math.max(distance, 1e-6), -1, 1)
+    );
+    const currentAzimuth = Math.atan2(currentPosition.z, currentPosition.x);
+    const deltaLatitude = animation.targetLatitude - currentLatitude;
+    let deltaAzimuth = animation.targetAzimuth - currentAzimuth;
+
+    while (deltaAzimuth > Math.PI) {
+      deltaAzimuth -= Math.PI * 2;
+    }
+    while (deltaAzimuth < -Math.PI) {
+      deltaAzimuth += Math.PI * 2;
+    }
+
+    const maxLatStep = animation.angularSpeed * delta;
+    const maxAzStep = animation.angularSpeed * delta * 1.18;
+    const nextLatitude =
+      Math.abs(deltaLatitude) > maxLatStep
+        ? currentLatitude + Math.sign(deltaLatitude) * maxLatStep
+        : animation.targetLatitude;
+    const nextAzimuth =
+      Math.abs(deltaAzimuth) > maxAzStep
+        ? currentAzimuth + Math.sign(deltaAzimuth) * maxAzStep
+        : animation.targetAzimuth;
+
+    const horizontalDistance = Math.cos(nextLatitude) * distance;
+    camera.position.set(
+      Math.cos(nextAzimuth) * horizontalDistance,
+      Math.sin(nextLatitude) * distance,
+      Math.sin(nextAzimuth) * horizontalDistance
+    );
+    camera.lookAt(0, 0, 0);
+    controlsRef.current?.update();
+
+    if (controlsRef.current) {
+      controlsRef.current.enabled = false;
+    }
+
+    if (
+      Math.abs(deltaLatitude) <= THREE.MathUtils.degToRad(0.35) &&
+      Math.abs(deltaAzimuth) <= THREE.MathUtils.degToRad(0.6)
+    ) {
+      if (controlsRef.current) {
+        controlsRef.current.enabled = true;
+      }
+      animationRef.current = null;
+    }
+  });
+
+  useEffect(() => {
+    const enteredSelection =
+      previousStageRef.current !== "landingResults" && stage === "landingResults";
+    const siteChanged =
+      stage === "landingResults" && previousSiteRef.current !== selectedLandingSite?.id;
+
+    previousStageRef.current = stage;
+    previousSiteRef.current = selectedLandingSite?.id;
+
+    if ((!enteredSelection && !siteChanged) || !selectedLandingSite?.cartesian) {
+      return;
+    }
+
+    const currentPosition = camera.position.clone();
+    const siteVector = new THREE.Vector3(
+      selectedLandingSite.cartesian.x,
+      selectedLandingSite.cartesian.y,
+      selectedLandingSite.cartesian.z
+    );
+    const targetAzimuth = Math.atan2(siteVector.z, siteVector.x);
+    const targetLatitude = THREE.MathUtils.degToRad(-85);
+
+    animationRef.current = {
+      targetAzimuth,
+      targetLatitude,
+      angularSpeed: THREE.MathUtils.degToRad(44)
+    };
+  }, [camera, controlsRef, selectedLandingSite, stage]);
+
+  return null;
 }
 
 function LatitudeRing({ radius, latitude, color }) {
@@ -336,6 +548,8 @@ function LandingSites({ radius, sites, selectedSiteId, stage }) {
 
 function ScanOverlay({ radius, mode }) {
   const ringRef = useRef(null);
+  const ringRadius = radius * 0.6;
+  const sweepAmplitude = radius * 0.82;
 
   useFrame(({ clock }) => {
     if (!ringRef.current) {
@@ -343,7 +557,7 @@ function ScanOverlay({ radius, mode }) {
     }
 
     const t = clock.getElapsedTime();
-    const sweep = Math.sin(t * 1.3) * radius * 0.95;
+    const sweep = Math.sin(t * 1.3) * sweepAmplitude;
     ringRef.current.position.y = sweep;
     ringRef.current.rotation.z += 0.012;
     ringRef.current.material.opacity = mode === "iceScan" ? 0.34 : 0.24;
@@ -351,7 +565,7 @@ function ScanOverlay({ radius, mode }) {
 
   return (
     <mesh ref={ringRef} rotation={[Math.PI / 2, 0, 0]}>
-      <torusGeometry args={[radius * 1.03, radius * 0.012, 20, 120]} />
+      <torusGeometry args={[ringRadius, radius * 0.008, 20, 120]} />
       <meshBasicMaterial
         color={mode === "iceScan" ? "#7fe7ff" : "#ffd479"}
         transparent
@@ -620,7 +834,9 @@ function buildPolarGrid(targetLatLon, hazards) {
     gridSize,
     hazardMap,
     toGrid,
-    toWorld
+    toWorld,
+    segmentCostCache: new Map(),
+    lineOfSightCache: new Map()
   };
 }
 
@@ -643,6 +859,13 @@ function cellDistance(a, b, grid) {
 }
 
 function segmentTraversalCost(startCell, endCell, grid) {
+  const cacheKey =
+    startCell.x < endCell.x || (startCell.x === endCell.x && startCell.y <= endCell.y)
+      ? `${startCell.x},${startCell.y}|${endCell.x},${endCell.y}`
+      : `${endCell.x},${endCell.y}|${startCell.x},${startCell.y}`;
+  if (grid.segmentCostCache.has(cacheKey)) {
+    return grid.segmentCostCache.get(cacheKey);
+  }
   const startWorld = cellToWorld(startCell, grid);
   const endWorld = cellToWorld(endCell, grid);
   const distance = Math.hypot(endWorld.x - startWorld.x, endWorld.y - startWorld.y);
@@ -657,6 +880,7 @@ function segmentTraversalCost(startCell, endCell, grid) {
     };
 
     if (isPolarWorldPointBlocked(worldPoint, grid.hazardMap)) {
+      grid.segmentCostCache.set(cacheKey, Infinity);
       return Infinity;
     }
 
@@ -667,11 +891,20 @@ function segmentTraversalCost(startCell, endCell, grid) {
       Math.abs(rho - Math.hypot(grid.target.x, grid.target.y)) * 0.002;
   }
 
-  return distance + penalty;
+  const cost = distance + penalty;
+  grid.segmentCostCache.set(cacheKey, cost);
+  return cost;
 }
 
 function hasLineOfSight(startCell, endCell, grid) {
-  return Number.isFinite(segmentTraversalCost(startCell, endCell, grid));
+  const cacheKey = `${startCell.x},${startCell.y}|${endCell.x},${endCell.y}`;
+  if (grid.lineOfSightCache.has(cacheKey)) {
+    return grid.lineOfSightCache.get(cacheKey);
+  }
+
+  const result = Number.isFinite(segmentTraversalCost(startCell, endCell, grid));
+  grid.lineOfSightCache.set(cacheKey, result);
+  return result;
 }
 
 function reconstructGridPath(cameFrom, currentKey) {
@@ -679,7 +912,11 @@ function reconstructGridPath(cameFrom, currentKey) {
   let walker = currentKey;
 
   while (cameFrom.has(walker)) {
-    walker = cameFrom.get(walker);
+    const next = cameFrom.get(walker);
+    if (!next || next === walker) {
+      break;
+    }
+    walker = next;
     path.push(walker);
   }
 
@@ -704,7 +941,7 @@ function solvePolarThetaStarPath(startLatLon, targetLatLon, hazards) {
   const startKey = `${startCell.x},${startCell.y}`;
   const targetKey = `${targetCell.x},${targetCell.y}`;
   const open = new Set([startKey]);
-  const cameFrom = new Map([[startKey, startKey]]);
+  const cameFrom = new Map();
   const gScore = new Map([[startKey, 0]]);
   const fScore = new Map([
     [
@@ -790,6 +1027,141 @@ function solvePolarThetaStarPath(startLatLon, targetLatLon, hazards) {
     }
   }
 
+  return null;
+}
+
+async function solvePolarThetaStarPathAsync(
+  startLatLon,
+  targetLatLon,
+  hazards,
+  options = {}
+) {
+  const { onProgress, progressStart = 0, progressEnd = 1 } = options;
+  const start = latLonToPolar(startLatLon);
+  const grid = buildPolarGrid(targetLatLon, hazards);
+  const dirs = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+    [1, 1],
+    [1, -1],
+    [-1, 1],
+    [-1, -1]
+  ];
+  const startCell = { x: grid.toGrid(start.x), y: grid.toGrid(start.y) };
+  const targetCell = { x: grid.toGrid(grid.target.x), y: grid.toGrid(grid.target.y) };
+  const startKey = `${startCell.x},${startCell.y}`;
+  const targetKey = `${targetCell.x},${targetCell.y}`;
+  const open = new Set([startKey]);
+  const cameFrom = new Map();
+  const gScore = new Map([[startKey, 0]]);
+  const fScore = new Map([
+    [
+      startKey,
+      Math.hypot(startCell.x - targetCell.x, startCell.y - targetCell.y)
+    ]
+  ]);
+  const iterationBudget = Math.max(1, grid.gridSize * grid.gridSize);
+  let iterations = 0;
+
+  const pushProgress = (value) => {
+    onProgress?.(
+      THREE.MathUtils.clamp(
+        THREE.MathUtils.lerp(progressStart, progressEnd, value),
+        progressStart,
+        progressEnd
+      )
+    );
+  };
+
+  pushProgress(0);
+
+  while (open.size) {
+    iterations += 1;
+    let currentKey = null;
+    let currentScore = Infinity;
+
+    open.forEach((key) => {
+      const score = fScore.get(key) ?? Infinity;
+      if (score < currentScore) {
+        currentScore = score;
+        currentKey = key;
+      }
+    });
+
+    if (!currentKey) {
+      break;
+    }
+
+    if (currentKey === targetKey) {
+      pushProgress(1);
+      return reconstructGridPath(cameFrom, currentKey).map((key) => {
+        const [x, y] = key.split(",").map(Number);
+        return { x: grid.toWorld(x), y: grid.toWorld(y) };
+      });
+    }
+
+    open.delete(currentKey);
+    const [cx, cy] = currentKey.split(",").map(Number);
+    const currentCell = { x: cx, y: cy };
+    const parentKey = cameFrom.get(currentKey) ?? currentKey;
+    const [px, py] = parentKey.split(",").map(Number);
+    const parentCell = { x: px, y: py };
+
+    for (const [dx, dy] of dirs) {
+      const nx = cx + dx;
+      const ny = cy + dy;
+
+      if (nx < 0 || ny < 0 || nx >= grid.gridSize || ny >= grid.gridSize) {
+        continue;
+      }
+
+      const neighborCell = { x: nx, y: ny };
+      const worldPoint = cellToWorld(neighborCell, grid);
+
+      if (isPolarWorldPointBlocked(worldPoint, grid.hazardMap)) {
+        continue;
+      }
+
+      const neighborKey = `${nx},${ny}`;
+      let predecessorKey = currentKey;
+      let tentative =
+        (gScore.get(currentKey) ?? Infinity) + segmentTraversalCost(currentCell, neighborCell, grid);
+
+      if (
+        parentKey !== currentKey &&
+        hasLineOfSight(parentCell, neighborCell, grid)
+      ) {
+        const parentTentative =
+          (gScore.get(parentKey) ?? Infinity) + segmentTraversalCost(parentCell, neighborCell, grid);
+
+        if (parentTentative < tentative) {
+          tentative = parentTentative;
+          predecessorKey = parentKey;
+        }
+      }
+
+      if (tentative >= (gScore.get(neighborKey) ?? Infinity)) {
+        continue;
+      }
+
+      cameFrom.set(neighborKey, predecessorKey);
+      gScore.set(neighborKey, tentative);
+      fScore.set(
+        neighborKey,
+        tentative + Math.hypot(nx - targetCell.x, ny - targetCell.y)
+      );
+      open.add(neighborKey);
+    }
+
+    if (iterations % 24 === 0) {
+      pushProgress(Math.min(0.96, iterations / iterationBudget));
+      await yieldToMainThread();
+    }
+  }
+
+  pushProgress(1);
   return null;
 }
 
@@ -1014,6 +1386,140 @@ function smoothSurfaceRoute(path, surfaceRadius) {
   });
 
   return result;
+}
+
+function yieldToMainThread() {
+  return new Promise((resolve) => {
+    if (typeof window !== "undefined" && "requestAnimationFrame" in window) {
+      window.requestAnimationFrame(() => {
+        window.setTimeout(resolve, 0);
+      });
+      return;
+    }
+
+    setTimeout(resolve, 0);
+  });
+}
+
+async function buildProjectedTraverseRoute({
+  selectedLandingSite,
+  campaignTargets,
+  traverseHazards,
+  surfaceRadius,
+  meshRoot,
+  onProgress
+}) {
+  const start = selectedLandingSite.cartesian;
+  const startLatLon = cartesianToLatLon(start);
+  const campaignPath = [];
+  let current = startLatLon;
+  const segmentCount = Math.max(1, campaignTargets.length + 1);
+
+  onProgress?.(2);
+
+  for (const [index, target] of campaignTargets.entries()) {
+    const progressStart = (index / segmentCount) * 72;
+    const progressEnd = ((index + 1) / segmentCount) * 72;
+    const segment =
+      (await solvePolarThetaStarPathAsync(
+        current,
+        {
+          latitude: target.latitude,
+          longitude: target.longitude
+        },
+        traverseHazards,
+        {
+          onProgress,
+          progressStart,
+          progressEnd
+        }
+      )) ??
+      fallbackPolarTraversePath(
+        current,
+        {
+          latitude: target.latitude,
+          longitude: target.longitude
+        },
+        traverseHazards
+      );
+
+    if (segment?.length) {
+      if (!campaignPath.length) {
+        campaignPath.push(...segment);
+      } else {
+        campaignPath.push(...segment.slice(1));
+      }
+      current = {
+        latitude: target.latitude,
+        longitude: target.longitude
+      };
+    }
+
+    await yieldToMainThread();
+  }
+
+  const returnSegment =
+    (await solvePolarThetaStarPathAsync(current, startLatLon, traverseHazards, {
+      onProgress,
+      progressStart: (campaignTargets.length / segmentCount) * 72,
+      progressEnd: 72
+    })) ??
+    fallbackPolarTraversePath(current, startLatLon, traverseHazards);
+
+  if (returnSegment?.length) {
+    if (!campaignPath.length) {
+      campaignPath.push(...returnSegment);
+    } else {
+      campaignPath.push(...returnSegment.slice(1));
+    }
+  }
+
+  await yieldToMainThread();
+  onProgress?.(78);
+
+  const smoothedRoute = campaignPath.length ? smoothSurfaceRoute(campaignPath, surfaceRadius) : null;
+  const routePoints = [];
+
+  if (smoothedRoute?.length) {
+    for (let index = 0; index < smoothedRoute.length; index += 1) {
+      routePoints.push(
+        projectDirectionOntoSurface(smoothedRoute[index], meshRoot, surfaceRadius, 0.018)
+      );
+
+      if (index % 18 === 0) {
+        onProgress?.(78 + (index / Math.max(smoothedRoute.length, 1)) * 16);
+        await yieldToMainThread();
+      }
+    }
+  }
+
+  await yieldToMainThread();
+  onProgress?.(95);
+
+  const campaignStopPoints = [];
+  for (let index = 0; index < campaignTargets.length; index += 1) {
+    const target = campaignTargets[index];
+    campaignStopPoints.push(
+      projectPointOntoMesh(
+        new THREE.Vector3(target.cartesian.x, target.cartesian.y, target.cartesian.z),
+        meshRoot,
+        surfaceRadius,
+        0.024
+      )
+    );
+
+    if (index % 2 === 0) {
+      onProgress?.(95 + ((index + 1) / Math.max(campaignTargets.length, 1)) * 5);
+      await yieldToMainThread();
+    }
+  }
+
+  onProgress?.(100);
+
+  return {
+    routePoints: routePoints.length ? routePoints : null,
+    campaignStopPoints
+  };
 }
 
 function MissionActors({
@@ -1365,7 +1871,10 @@ function MoonModel({
   landingSites,
   iceCandidates,
   traverseHazards,
-  onTraverseComplete
+  onTraverseComplete,
+  onSceneReady,
+  onRouteBuildStateChange,
+  onRouteBuildProgressChange
 }) {
   const [gltfScene, setGltfScene] = useState(null);
   const [loadProgress, setLoadProgress] = useState(0);
@@ -1376,6 +1885,11 @@ function MoonModel({
   const [bounds, setBounds] = useState({ radius: 1 });
   const [polePoints, setPolePoints] = useState(null);
   const [surfaceReady, setSurfaceReady] = useState(false);
+  const [routePoints, setRoutePoints] = useState(null);
+  const [campaignStopPoints, setCampaignStopPoints] = useState(null);
+  const [routeBuildState, setRouteBuildState] = useState("idle");
+  const [routeBuildProgress, setRouteBuildProgress] = useState(0);
+  const routeCacheRef = useRef(new Map());
 
   useEffect(() => {
     let cancelled = false;
@@ -1510,6 +2024,10 @@ function MoonModel({
   }, [modelScene]);
 
   useEffect(() => {
+    onSceneReady?.(Boolean(modelScene && surfaceReady && !loadActive && !loadError));
+  }, [loadActive, loadError, modelScene, onSceneReady, surfaceReady]);
+
+  useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
@@ -1524,66 +2042,94 @@ function MoonModel({
     return selectCampaignTargets(selectedLandingSite, iceCandidates, 5);
   }, [iceCandidates, selectedLandingSite]);
 
-  const routePoints = useMemo(() => {
-    const shouldBuildRoute =
+  useEffect(() => {
+    onRouteBuildStateChange?.(routeBuildState);
+  }, [onRouteBuildStateChange, routeBuildState]);
+
+  useEffect(() => {
+    onRouteBuildProgressChange?.(routeBuildProgress);
+  }, [onRouteBuildProgressChange, routeBuildProgress]);
+
+  useEffect(() => {
+    const shouldPrepareRoute =
+      stage === "landed" ||
       stage === "pathReady" ||
       stage === "traverse" ||
       stage === "hopper" ||
       stage === "complete";
 
     if (
-      !shouldBuildRoute ||
+      !shouldPrepareRoute ||
       !selectedLandingSite ||
       !iceCandidates?.length ||
       !bounds.radius ||
       !surfaceReady ||
       !rootRef.current
     ) {
-      return null;
+      if (!shouldPrepareRoute) {
+        setRoutePoints(null);
+        setCampaignStopPoints(null);
+        setRouteBuildState("idle");
+        setRouteBuildProgress(0);
+      }
+      return undefined;
     }
 
-    const start = selectedLandingSite.cartesian;
-    const startLatLon = cartesianToLatLon(start);
-    const campaignPath = buildCampaignTraversePath(
-      startLatLon,
-      campaignTargets,
-      traverseHazards,
-      startLatLon
-    );
-
-    return campaignPath
-      ? smoothSurfaceRoute(campaignPath, bounds.radius)?.map((point) =>
-          projectDirectionOntoSurface(point, rootRef.current, bounds.radius, 0.018)
-        )
-      : null;
-  }, [bounds.radius, campaignTargets, selectedLandingSite, stage, surfaceReady, traverseHazards]);
-  const campaignStopPoints = useMemo(() => {
-    const shouldBuildStops =
-      stage === "pathReady" ||
-      stage === "traverse" ||
-      stage === "hopper" ||
-      stage === "complete";
-
-    if (
-      !shouldBuildStops ||
-      !selectedLandingSite ||
-      !iceCandidates?.length ||
-      !bounds.radius ||
-      !surfaceReady ||
-      !rootRef.current
-    ) {
-      return null;
+    const cacheKey = selectedLandingSite.id;
+    const cachedRoute = routeCacheRef.current.get(cacheKey);
+    if (cachedRoute) {
+      setRoutePoints(cachedRoute.routePoints);
+      setCampaignStopPoints(cachedRoute.campaignStopPoints);
+      setRouteBuildState("ready");
+      setRouteBuildProgress(100);
+      return undefined;
     }
 
-    return campaignTargets.map((target) =>
-      projectPointOntoMesh(
-        new THREE.Vector3(target.cartesian.x, target.cartesian.y, target.cartesian.z),
-        rootRef.current,
-        bounds.radius,
-        0.024
-      )
-    );
-  }, [bounds.radius, campaignTargets, iceCandidates, selectedLandingSite, stage, surfaceReady]);
+    let cancelled = false;
+    setRouteBuildState("building");
+    setRouteBuildProgress(1);
+
+    const buildRoute = async () => {
+      await yieldToMainThread();
+
+      const builtRoute = await buildProjectedTraverseRoute({
+        selectedLandingSite,
+        campaignTargets,
+        traverseHazards,
+        surfaceRadius: bounds.radius,
+        meshRoot: rootRef.current,
+        onProgress: (progress) => {
+          if (!cancelled) {
+            setRouteBuildProgress(progress);
+          }
+        }
+      });
+
+      if (cancelled) {
+        return;
+      }
+
+      routeCacheRef.current.set(cacheKey, builtRoute);
+      setRoutePoints(builtRoute.routePoints);
+      setCampaignStopPoints(builtRoute.campaignStopPoints);
+      setRouteBuildProgress(100);
+      setRouteBuildState("ready");
+    };
+
+    buildRoute();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    bounds.radius,
+    campaignTargets,
+    iceCandidates,
+    selectedLandingSite,
+    stage,
+    surfaceReady,
+    traverseHazards
+  ]);
 
   const projectedLandingSites = useMemo(() => {
     if (!bounds.radius || !surfaceReady || !rootRef.current) {
@@ -1646,6 +2192,12 @@ function MoonModel({
           />
         )}
         <PoleMarkers points={polePoints} radius={bounds.radius * 1.01} />
+        {routeBuildState === "building" &&
+          (stage === "landed" ||
+            stage === "pathReady" ||
+            stage === "traverse" ||
+            stage === "hopper" ||
+            stage === "complete") && <RouteBuildOverlay progress={routeBuildProgress} />}
         <MissionActors
           stage={stage}
           landingPoint={[
@@ -1669,8 +2221,13 @@ export default function MoonScene({
   landingSites,
   iceCandidates,
   traverseHazards,
-  onTraverseComplete
+  onTraverseComplete,
+  onSceneReady,
+  onRouteBuildStateChange,
+  onRouteBuildProgressChange
 }) {
+  const controlsRef = useRef(null);
+
   return (
     <div className="canvas-wrap">
       <Canvas
@@ -1682,6 +2239,12 @@ export default function MoonScene({
         <ambientLight intensity={0.45} />
         <directionalLight position={[5, 0.9, 0]} intensity={1.15} color="#efe2b8" />
         <directionalLight position={[-4, -2, -3]} intensity={0.08} color="#5f7fb0" />
+        <IceScanAutoFramer stage={stage} controlsRef={controlsRef} />
+        <LandingSelectionAutoFramer
+          stage={stage}
+          controlsRef={controlsRef}
+          selectedLandingSite={selectedLandingSite}
+        />
         <SceneErrorBoundary fallback={<SceneError />}>
           <MoonModel
             stage={stage}
@@ -1690,18 +2253,19 @@ export default function MoonScene({
             iceCandidates={iceCandidates}
             traverseHazards={traverseHazards}
             onTraverseComplete={onTraverseComplete}
+            onSceneReady={onSceneReady}
+            onRouteBuildStateChange={onRouteBuildStateChange}
+            onRouteBuildProgressChange={onRouteBuildProgressChange}
           />
         </SceneErrorBoundary>
         <ArcballControls
+          ref={controlsRef}
           enablePan={false}
           minDistance={MIN_CAMERA_DISTANCE}
           maxDistance={MAX_CAMERA_DISTANCE}
           rotateSpeed={0.9}
         />
       </Canvas>
-      <div className="viewer-hud">
-        <div className="hud-chip">Drag: rotate</div>
-      </div>
     </div>
   );
 }
